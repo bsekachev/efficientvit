@@ -58,7 +58,6 @@ class DecoderOnnxModel(nn.Module):
         best_idx = torch.argmax(iou_preds, dim=1)
         masks = masks[torch.arange(masks.shape[0]), best_idx, :, :].unsqueeze(1)
         iou_preds = iou_preds[torch.arange(masks.shape[0]), best_idx].unsqueeze(1)
-
         return masks, iou_preds
 
     @torch.no_grad()
@@ -67,6 +66,7 @@ class DecoderOnnxModel(nn.Module):
         image_embeddings: torch.Tensor,
         point_coords: torch.Tensor,
         point_labels: torch.Tensor,
+        orig_im_size: torch.Tensor,
     ):
         sparse_embedding = self._embed_points(point_coords, point_labels)
         dense_embedding = self.model.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
@@ -80,10 +80,26 @@ class DecoderOnnxModel(nn.Module):
             dense_prompt_embeddings=dense_embedding,
         )
 
+        # self.model.postprocess_masks
+
         if self.return_single_mask:
             masks, scores = self.select_masks(masks, scores, point_coords.shape[1])
+            masks = (masks > 0).to(torch.uint8)
+            orig_im_size = orig_im_size.to(torch.int64)
+            masks = F.interpolate(masks, size=(1024, 1024), mode="bilinear", align_corners=False)
+            transformed_h, transfomed_w = DecoderOnnxModel.resize_longest_image_size(orig_im_size, 1024)
+            masks = masks[..., : transformed_h, : transfomed_w]
+            masks = F.interpolate(masks, size=(orig_im_size[0], orig_im_size[1]), mode="bilinear", align_corners=False)
+            nonzero = torch.nonzero(masks)
+            xindices = nonzero[:, 3:4]
+            yindices = nonzero[:, 2:3]
+            ytl = torch.min(yindices).to(torch.int64)
+            ybr = torch.max(yindices).to(torch.int64)
+            xtl = torch.min(xindices).to(torch.int64)
+            xbr = torch.max(xindices).to(torch.int64)
+            return masks, xtl, ytl, xbr, ybr, scores
 
-        return masks, scores
+        return masks, xtl, ytl, xbr, ybr, scores
 
 
 def run_export(
@@ -102,21 +118,22 @@ def run_export(
     )
 
     dynamic_axes = {
-        "point_coords": {0: "batch_size", 1: "num_points"},
-        "point_labels": {0: "batch_size", 1: "num_points"},
+        "point_coords": {1: "num_points"},
+        "point_labels": {1: "num_points"},
     }
 
     embed_dim = efficientvit_sam.prompt_encoder.embed_dim
     embed_size = efficientvit_sam.prompt_encoder.image_embedding_size
     dummy_inputs = {
         "image_embeddings": torch.randn(1, embed_dim, *embed_size, dtype=torch.float),
-        "point_coords": torch.randint(low=0, high=1024, size=(16, 2, 2), dtype=torch.float),
-        "point_labels": torch.randint(low=0, high=4, size=(16, 2), dtype=torch.float),
+        "point_coords": torch.randint(low=0, high=1024, size=(1, 2, 2), dtype=torch.float),
+        "point_labels": torch.randint(low=0, high=4, size=(1, 2), dtype=torch.float),
+        "orig_im_size": torch.tensor([1080, 1920], dtype=torch.float),
     }
 
     _ = onnx_model(**dummy_inputs)
 
-    output_names = ["masks", "iou_predictions"]
+    output_names = ["masks", "xtl", "ytl", "xbr", "ybr", "iou_predictions"]
 
     if not os.path.exists(os.path.dirname(output)):
         os.makedirs(os.path.dirname(output))
@@ -142,12 +159,13 @@ def run_export(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str)
+    parser.add_argument("--model", type=str, default='xl0')
     parser.add_argument("--weight_url", type=str)
-    parser.add_argument("--output", type=str, required=True, help="The filename to save the onnx model to.")
-    parser.add_argument("--opset", type=int, default=17, help="The ONNX opset version to use. Must be >=11.")
+    parser.add_argument("--output", type=str, default='./test.onnx', help="The filename to save the onnx model to.")
+    parser.add_argument("--opset", type=int, default=16, help="The ONNX opset version to use. Must be >=11.")
     parser.add_argument(
         "--return-single-mask",
+        default=True,
         action="store_true",
         help=(
             "If true, the exported ONNX model will only return the best mask, "
