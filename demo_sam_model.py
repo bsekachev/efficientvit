@@ -121,7 +121,7 @@ def draw_scatter(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default='xl1')
+    parser.add_argument("--model", type=str)
     parser.add_argument("--weight_url", type=str, default=None)
     parser.add_argument("--multimask", action="store_true")
     parser.add_argument("--image_path", type=str, default="assets/fig/cat.jpg")

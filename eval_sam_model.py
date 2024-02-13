@@ -8,7 +8,7 @@ import os
 
 import numpy as np
 import torch
-# from lvis import LVIS
+from lvis import LVIS
 from PIL import Image
 from pycocotools import mask as mask_util
 from pycocotools.coco import COCO
@@ -243,7 +243,7 @@ def evaluate(results, prompt_type, dataset, annotation_json_file=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default='xl1')
+    parser.add_argument("--model", type=str)
     parser.add_argument("--weight_url", type=str, default=None)
     parser.add_argument("--prompt_type", type=str, default="point", choices=["point", "box", "box_from_detector"])
     parser.add_argument("--num_click", type=int, default=1)
