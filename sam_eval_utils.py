@@ -6,7 +6,7 @@ import copy
 
 import cv2
 import numpy as np
-# from lvis import LVISEval, LVISResults
+from lvis import LVISEval, LVISResults
 from pycocotools.cocoeval import COCOeval
 
 
